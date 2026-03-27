@@ -31,7 +31,7 @@ class AgentBase:
         del self.ClassCri, self.ClassAct
 
     def select_action(self, state) -> np.ndarray:
-        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device)
+        states = torch.as_tensor(np.asarray(state), dtype=torch.float32, device=self.device).unsqueeze(0)
         action = self.act(states)[0]
         action = (action + torch.randn_like(action) * self.explore_noise).clamp(-1, 1)
         return action.detach().cpu().numpy()
@@ -164,7 +164,7 @@ class AgentSAC(AgentBase):
         self.target_entropy = np.log(action_dim)
 
     def select_action(self, state):
-        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device)
+        states = torch.as_tensor(np.asarray(state), dtype=torch.float32, device=self.device).unsqueeze(0)
         actions = self.act.get_action(states)
         return actions.detach().cpu().numpy()[0]
 
@@ -233,7 +233,7 @@ class AgentPPO(AgentBase):
         self.get_reward_sum = self.get_reward_sum_gae if if_use_gae else self.get_reward_sum_raw
 
     def select_action(self, state):
-        states = torch.as_tensor((state,), dtype=torch.float32, device=self.device)
+        states = torch.as_tensor(np.asarray(state), dtype=torch.float32, device=self.device).unsqueeze(0)
         actions, noises = self.act.get_action(states)
         return actions[0].detach().cpu().numpy(), noises[0].detach().cpu().numpy()
 
@@ -241,11 +241,11 @@ class AgentPPO(AgentBase):
         state = self.state
 
         trajectory_temp = list()
-        last_done = 0
+        last_done = -1
         for i in range(target_step):
             action, noise = self.select_action(state)
-            next_state, reward, done, _ = env.step(np.tanh(action))
-            trajectory_temp.append((state, reward, done, action, noise))
+            current_state, next_state, reward, done = env.step(np.tanh(action))
+            trajectory_temp.append((current_state, reward, done, action, noise))
             if done:
                 state = env.reset()
                 last_done = i
@@ -254,8 +254,12 @@ class AgentPPO(AgentBase):
         self.state = state
 
         '''splice list'''
+        if last_done < 0:
+            self.trajectory_list.extend(trajectory_temp)
+            return list()
+
         trajectory_list = self.trajectory_list + trajectory_temp[:last_done + 1]
-        self.trajectory_list = trajectory_temp[last_done:]
+        self.trajectory_list = trajectory_temp[last_done + 1:]
         return trajectory_list
 
     def update_net(self, buffer, batch_size, repeat_times, soft_update_tau):
@@ -285,12 +289,12 @@ class AgentPPO(AgentBase):
             logprob = buf_logprob[indices]
             advantage = buf_advantage[indices]
 
-            new_logprob, obj_entropy = self.act.get_logprob_entropy(state, action)  # it is obj_actor
+            new_logprob, dist_entropy = self.act.get_logprob_entropy(state, action)
             ratio = (new_logprob - logprob.detach()).exp()
             surrogate1 = advantage * ratio
             surrogate2 = advantage * ratio.clamp(1 - self.ratio_clip, 1 + self.ratio_clip)
             obj_surrogate = -torch.min(surrogate1, surrogate2).mean()
-            obj_actor = obj_surrogate + obj_entropy * self.lambda_entropy
+            obj_actor = obj_surrogate - dist_entropy * self.lambda_entropy
             self.optim_update(self.act_optim, obj_actor)
 
             value = self.cri(state).squeeze(1)  # critic network predicts the reward_sum (Q value) of state
@@ -324,8 +328,6 @@ class AgentPPO(AgentBase):
             buf_advantage[i] = ten_reward[i] + ten_mask[i] * (pre_advantage - ten_value[i])  # fix a bug here
             pre_advantage = ten_value[i] + buf_advantage[i] * self.lambda_gae_adv
         return buf_r_sum, buf_advantage
-
-
 
 
 

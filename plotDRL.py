@@ -1,5 +1,6 @@
 import pickle
 from re import escape
+import shutil
 import matplotlib.pyplot as plt
 import seaborn as sns 
 import numpy as np 
@@ -7,7 +8,8 @@ import pandas as pd
 import os
 from tools import Arguments
 import matplotlib
-matplotlib.rc('text', usetex=True)
+# Use LaTeX when available, but do not require it for basic plotting.
+matplotlib.rc('text', usetex=shutil.which('latex') is not None)
 pd.options.display.notebook_repr_html=False  
 
 def plot_evaluation_information(datasource,directory):
@@ -164,7 +166,6 @@ def smooth(data, sm=5):
         return smooth_data
 if __name__=='__main__':
     print('test dir and plot shadow loss with sub figure ')
-
 
 
 
