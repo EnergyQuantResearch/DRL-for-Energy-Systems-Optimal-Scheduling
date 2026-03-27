@@ -2,7 +2,8 @@
 # ------------------------------------------------------------------------
 # Energy management environment for reinforcement learning agents developed by
 # Hou Shengren, TU Delft, h.shengren@tudelft.nl
-import random
+from pathlib import Path
+
 import numpy as np
 import pandas as pd 
 import gym
@@ -131,17 +132,25 @@ class ESSEnv(gym.Env):
 
         self.state_space=spaces.Box(low=0,high=1,shape=(7,),dtype=np.float32)
 
+    def seed(self, seed=None):
+        np.random.seed(seed)
+        return [seed]
+
     @property
     def netload(self):
-
-        return self.demand-self.grid.wp_gen-self.grid.pv_gen
+        if self.month is None or self.day is None or self.current_time is None:
+            raise RuntimeError('Environment must be reset before reading netload.')
+        demand = self.data_manager.get_electricity_cons_data(self.month, self.day, self.current_time)
+        pv_generation = self.data_manager.get_pv_data(self.month, self.day, self.current_time)
+        return demand - pv_generation
         
     def reset(self,):
         self.month=np.random.randint(1,13)# here we choose 12 month
         if self.TRAIN:
             self.day=np.random.randint(1,20)
         else:
-            self.day=np.random.randint(20,Constant.MONTHS_LEN[self.month]-1)
+            max_day = Constant.MONTHS_LEN[self.month - 1]
+            self.day=np.random.randint(20,max_day)
         self.current_time=0
         self.battery.reset()
         self.dg1.reset()
@@ -158,8 +167,10 @@ class ESSEnv(gym.Env):
         pv_generation=self.data_manager.get_pv_data(self.month,self.day,self.current_time)
         price=self.data_manager.get_price_data(self.month,self.day,self.current_time)
         net_load=electricity_demand-pv_generation
-        obs=np.concatenate((np.float32(time_step),np.float32(price),np.float32(soc),np.float32(net_load),np.float32(dg1_output),np.float32(dg2_output),np.float32(dg3_output)),axis=None)
-        return obs
+        return np.asarray(
+            [time_step, price, soc, net_load, dg1_output, dg2_output, dg3_output],
+            dtype=np.float32,
+        )
 
     def step(self,action):# state transition here current_obs--take_action--get reward-- get_finish--next_obs
         ## here we want to put take action into each components
@@ -229,11 +240,12 @@ class ESSEnv(gym.Env):
     def render(self, current_obs, next_obs, reward, finish):
         print('day={},hour={:2d}, state={}, next_state={}, reward={:.4f}, terminal={}\n'.format(self.day,self.current_time, current_obs, next_obs, reward, finish))
     def _load_year_data(self):
-        pv_df=pd.read_csv('data/PV.csv',sep=';')
+        data_dir = Path(__file__).resolve().parent / 'data'
+        pv_df=pd.read_csv(data_dir / 'PV.csv',sep=';')
         #hourly price data for a year 
-        price_df=pd.read_csv('data/Prices.csv',sep=';')
+        price_df=pd.read_csv(data_dir / 'Prices.csv',sep=';')
         # mins electricity consumption data for a year 
-        electricity_df=pd.read_csv('data/H4.csv',sep=';')
+        electricity_df=pd.read_csv(data_dir / 'H4.csv',sep=';')
         pv_data=pv_df['P_PV_'].apply(lambda x: x.replace(',','.')).to_numpy(dtype=float)
         price=price_df['Price'].apply(lambda x:x.replace(',','.')).to_numpy(dtype=float)
         electricity=electricity_df['Power'].apply(lambda x:x.replace(',','.')).to_numpy(dtype=float)

@@ -1,16 +1,16 @@
-import torch 
-import pandas as pd 
-import numpy.random as rd
-import os 
+import os
+
 import numpy as np
-from pyomo.core.base.config import default_pyomo_config
-from pyomo.core.base.piecewise import Bound
-from pyomo.environ import *
-from pyomo.opt import SolverFactory
-import gurobipy as gp
-from gurobipy import GRB
-from gurobipy import *
+import numpy.random as rd
+import pandas as pd
+import torch
+
 def optimization_base_result(env,month,day,initial_soc):
+    try:
+        import gurobipy as gp
+        from gurobipy import GRB
+    except ImportError as exc:
+        raise ImportError('optimization_base_result requires gurobipy to be installed.') from exc
 
     pv=env.data_manager.get_series_pv_data(month,day)
     price=env.data_manager.get_series_price_data(month,day)
@@ -168,8 +168,8 @@ def test_one_episode(env, act, device):
     state=env.reset()
     record_init_info.append([env.month,env.day,env.current_time,env.battery.current_capacity])
     print(f'current testing month is {env.month}, day is {env.day},initial_soc is {env.battery.current_capacity}' )
-    for i in range(24):
-        s_tensor = torch.as_tensor((state,), device=device)
+    for _ in range(env.episode_length):
+        s_tensor = torch.as_tensor(np.asarray(state), dtype=torch.float32, device=device).unsqueeze(0)
         a_tensor = act(s_tensor)  
         action = a_tensor.detach().cpu().numpy()[0]  # not need detach(), because with torch.no_grad() outside
         real_action=action
@@ -192,8 +192,8 @@ def get_episode_return(env, act, device):
     episode_return = 0.0  # sum of rewards in an episode
     episode_unbalance=0.0
     state = env.reset()
-    for i in range(24):
-        s_tensor = torch.as_tensor((state,), device=device)
+    for _ in range(env.episode_length):
+        s_tensor = torch.as_tensor(np.asarray(state), dtype=torch.float32, device=device).unsqueeze(0)
         a_tensor = act(s_tensor)
         action = a_tensor.detach().cpu().numpy()[0]  # not need detach(), because with torch.no_grad() outside
         state, next_state, reward, done,= env.step(action)
